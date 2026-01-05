@@ -38,3 +38,4 @@ data/
 *.swp
 *.swo
 *~
+YOUR_DEPLOYMENT_SECRETS.txt
