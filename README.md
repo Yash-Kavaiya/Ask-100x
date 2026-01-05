@@ -181,58 +181,65 @@ Run the bot in development mode and test commands in your Discord server.
 
 This bot can be deployed to Google Cloud Run for 24/7 availability with automatic scaling and logging.
 
-### Quick Deploy
+### 🚀 Simple Deploy (5 Minutes - No Service Account Needed!)
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+See [SIMPLE-DEPLOY.md](SIMPLE-DEPLOY.md) for the easiest deployment method.
 
-#### Prerequisites
-- Google Cloud Platform account
-- GitHub repository
-- Discord bot token
+#### Quick Start
 
-#### Setup GitHub Secrets
-
-Add these secrets to your GitHub repository (Settings → Secrets and variables → Actions):
-
-| Secret | Description |
-|--------|-------------|
-| `GCP_PROJECT_ID` | Your GCP Project ID |
-| `GCP_SA_KEY` | Service Account JSON Key |
-| `DISCORD_TOKEN` | Your Discord bot token |
-
-#### Auto-Deploy
-
-Push to `main` or `master` branch to automatically deploy:
-
+1. **Install gcloud CLI and authenticate:**
 ```bash
-git add .
-git commit -m "Deploy to Cloud Run"
-git push origin main
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
 ```
 
-The GitHub Actions workflow will:
-1. Build Docker image
-2. Push to Google Container Registry
-3. Deploy to Cloud Run
-4. Configure logging and monitoring
-
-#### View Logs
-
+2. **Enable APIs:**
 ```bash
-# View logs in real-time
+gcloud services enable run.googleapis.com
+gcloud services enable containerregistry.googleapis.com
+```
+
+3. **Deploy with one command:**
+```bash
+gcloud run deploy discord-bot-ask-100x \
+  --source . \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "DISCORD_TOKEN=YOUR_DISCORD_TOKEN_HERE,DAILY_MESSAGE_LIMIT=10,LOG_LEVEL=INFO" \
+  --memory 512Mi \
+  --cpu 1 \
+  --timeout 3600 \
+  --max-instances 1 \
+  --min-instances 1 \
+  --no-cpu-throttling
+```
+
+> **Note:** Replace `YOUR_DISCORD_TOKEN_HERE` with your actual Discord bot token.
+
+4. **View logs:**
+```bash
 gcloud run services logs tail discord-bot-ask-100x \
   --platform managed \
   --region us-central1
 ```
 
+That's it! Your bot is now running 24/7 on Cloud Run.
+
+### Advanced: CI/CD with GitHub Actions
+
+For automatic deployments on git push, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 #### Features
-- ✅ Automatic deployment via GitHub Actions
 - ✅ Comprehensive logging with Google Cloud Logging
 - ✅ Always-on (min-instances=1)
 - ✅ Health checks and auto-restart
-- ✅ Environment variable management
+- ✅ Easy updates (just redeploy)
+- ✅ ~$15-25/month cost
 
-For complete deployment guide, see [DEPLOYMENT.md](DEPLOYMENT.md).
+**Deployment Guides:**
+- [SIMPLE-DEPLOY.md](SIMPLE-DEPLOY.md) - Direct deployment (recommended)
+- [DEPLOYMENT.md](DEPLOYMENT.md) - GitHub Actions CI/CD (advanced)
 
 ## License
 
