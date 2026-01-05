@@ -4,6 +4,8 @@ from discord.ext import commands
 import os
 import json
 import asyncio
+import logging
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -11,9 +13,22 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Configure logging
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger('discord_bot')
+
 # Configuration
 TOKEN = os.getenv('DISCORD_TOKEN')
 DAILY_MESSAGE_LIMIT = int(os.getenv('DAILY_MESSAGE_LIMIT', 10))
+
+logger.info(f"Bot starting with configuration: DAILY_MESSAGE_LIMIT={DAILY_MESSAGE_LIMIT}")
 
 # Data directory setup
 DATA_DIR = Path('data')
@@ -38,9 +53,11 @@ class AskBot(commands.Bot):
 
     async def setup_hook(self):
         """Called when the bot is starting up"""
+        logger.info("Bot setup hook called")
         await self.load_data()
+        logger.info("Syncing slash commands...")
         await self.tree.sync()
-        print(f"Slash commands synced!")
+        logger.info("Slash commands synced successfully!")
 
     async def load_data(self):
         """Load user data and chat history from files"""
@@ -48,14 +65,16 @@ class AskBot(commands.Bot):
             if USER_DATA_FILE.exists():
                 with open(USER_DATA_FILE, 'r') as f:
                     self.user_data = json.load(f)
+                logger.info(f"Loaded data for {len(self.user_data)} users")
 
             if HISTORY_FILE.exists():
                 with open(HISTORY_FILE, 'r') as f:
                     self.chat_history = json.load(f)
+                logger.info(f"Loaded history for {len(self.chat_history)} users")
 
-            print("Data loaded successfully!")
+            logger.info("Data loaded successfully!")
         except Exception as e:
-            print(f"Error loading data: {e}")
+            logger.error(f"Error loading data: {e}", exc_info=True)
             self.user_data = {}
             self.chat_history = {}
 
@@ -68,8 +87,10 @@ class AskBot(commands.Bot):
             with open(HISTORY_FILE, 'w') as f:
                 json.dump(self.chat_history, f, indent=2)
 
+            logger.debug("Data saved successfully")
+
         except Exception as e:
-            print(f"Error saving data: {e}")
+            logger.error(f"Error saving data: {e}", exc_info=True)
 
     def check_rate_limit(self, user_id: str) -> tuple[bool, int]:
         """
@@ -128,9 +149,10 @@ bot = AskBot()
 @bot.event
 async def on_ready():
     """Called when the bot is ready"""
-    print(f'Bot is ready! Logged in as {bot.user.name} (ID: {bot.user.id})')
-    print(f'Connected to {len(bot.guilds)} guild(s)')
-    print('------')
+    logger.info(f'Bot is ready! Logged in as {bot.user.name} (ID: {bot.user.id})')
+    logger.info(f'Connected to {len(bot.guilds)} guild(s)')
+    logger.info(f'Bot user: {bot.user.name}#{bot.user.discriminator}')
+    logger.info('------')
 
 @bot.tree.command(name="ask", description="Ask a question to the bot")
 @app_commands.describe(question="Your question")
@@ -139,10 +161,13 @@ async def ask(interaction: discord.Interaction, question: str):
     user_id = interaction.user.id
     username = interaction.user.name
 
+    logger.info(f"User {username} (ID: {user_id}) asked: {question[:100]}...")
+
     # Check rate limit
     can_send, remaining = bot.check_rate_limit(user_id)
 
     if not can_send:
+        logger.warning(f"User {username} (ID: {user_id}) exceeded daily limit")
         embed = discord.Embed(
             title="⚠️ Daily Limit Reached",
             description=f"You've reached your daily limit of {DAILY_MESSAGE_LIMIT} messages. Please try again tomorrow!",
@@ -156,6 +181,7 @@ async def ask(interaction: discord.Interaction, question: str):
 
     # Increment count
     bot.increment_message_count(user_id)
+    logger.info(f"User {username} has {remaining - 1} messages remaining")
 
     # Generate a simple response (you can integrate with an AI API here)
     response = f"Thank you for your question: '{question}'\n\n"
@@ -178,10 +204,13 @@ async def ask(interaction: discord.Interaction, question: str):
     embed.set_footer(text=f"Asked by {username}")
 
     await interaction.followup.send(embed=embed)
+    logger.info(f"Response sent to {username} (ID: {user_id})")
 
 @bot.tree.command(name="info", description="Get information about the bot")
 async def info(interaction: discord.Interaction):
     """Info command - displays bot information"""
+    logger.info(f"User {interaction.user.name} requested bot info")
+
     embed = discord.Embed(
         title="ℹ️ Bot Information",
         description="Ask-100x Discord Bot - A simple chat bot with rate limiting",
@@ -214,6 +243,7 @@ async def info(interaction: discord.Interaction):
 async def stats(interaction: discord.Interaction):
     """Stats command - displays user statistics"""
     user_id = str(interaction.user.id)
+    logger.info(f"User {interaction.user.name} requested stats")
 
     if user_id not in bot.user_data:
         embed = discord.Embed(
@@ -370,17 +400,19 @@ async def help_command(interaction: discord.Interaction):
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     """Global error handler for slash commands"""
     if isinstance(error, app_commands.CommandOnCooldown):
+        logger.warning(f"Command cooldown for user {interaction.user.name}: {error.retry_after:.2f}s")
         await interaction.response.send_message(
             f"⏱️ This command is on cooldown. Try again in {error.retry_after:.2f} seconds.",
             ephemeral=True
         )
     elif isinstance(error, app_commands.MissingPermissions):
+        logger.warning(f"Permission denied for user {interaction.user.name}")
         await interaction.response.send_message(
             "❌ You don't have permission to use this command.",
             ephemeral=True
         )
     else:
-        print(f"Error: {error}")
+        logger.error(f"Command error: {error}", exc_info=True)
         await interaction.response.send_message(
             "❌ An error occurred while processing your command.",
             ephemeral=True
@@ -389,11 +421,15 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # Run the bot
 if __name__ == "__main__":
     if not TOKEN:
-        print("ERROR: DISCORD_TOKEN not found in environment variables!")
-        print("Please create a .env file with your bot token.")
+        logger.error("DISCORD_TOKEN not found in environment variables!")
+        logger.error("Please create a .env file with your bot token.")
         exit(1)
 
     try:
-        bot.run(TOKEN)
+        logger.info("Starting Discord bot...")
+        bot.run(TOKEN, log_handler=None)  # We're using our own logging
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
     except Exception as e:
-        print(f"Failed to start bot: {e}")
+        logger.error(f"Failed to start bot: {e}", exc_info=True)
+        exit(1)

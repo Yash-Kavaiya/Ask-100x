@@ -177,6 +177,63 @@ async def my_command(interaction: discord.Interaction):
 
 Run the bot in development mode and test commands in your Discord server.
 
+## Deployment to Google Cloud Run
+
+This bot can be deployed to Google Cloud Run for 24/7 availability with automatic scaling and logging.
+
+### Quick Deploy
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+
+#### Prerequisites
+- Google Cloud Platform account
+- GitHub repository
+- Discord bot token
+
+#### Setup GitHub Secrets
+
+Add these secrets to your GitHub repository (Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `GCP_PROJECT_ID` | Your GCP Project ID |
+| `GCP_SA_KEY` | Service Account JSON Key |
+| `DISCORD_TOKEN` | Your Discord bot token |
+
+#### Auto-Deploy
+
+Push to `main` or `master` branch to automatically deploy:
+
+```bash
+git add .
+git commit -m "Deploy to Cloud Run"
+git push origin main
+```
+
+The GitHub Actions workflow will:
+1. Build Docker image
+2. Push to Google Container Registry
+3. Deploy to Cloud Run
+4. Configure logging and monitoring
+
+#### View Logs
+
+```bash
+# View logs in real-time
+gcloud run services logs tail discord-bot-ask-100x \
+  --platform managed \
+  --region us-central1
+```
+
+#### Features
+- ✅ Automatic deployment via GitHub Actions
+- ✅ Comprehensive logging with Google Cloud Logging
+- ✅ Always-on (min-instances=1)
+- ✅ Health checks and auto-restart
+- ✅ Environment variable management
+
+For complete deployment guide, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## License
 
 MIT License - Feel free to use and modify!
