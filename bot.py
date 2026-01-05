@@ -13,16 +13,56 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure logging for Google Cloud Run
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+
+# Structured logging format for Cloud Logging
+class StructuredFormatter(logging.Formatter):
+    def format(self, record):
+        log_obj = {
+            'severity': record.levelname,
+            'message': record.getMessage(),
+            'component': record.name,
+            'timestamp': self.formatTime(record, self.datefmt),
+        }
+
+        # Add exception info if present
+        if record.exc_info:
+            log_obj['exception'] = self.formatException(record.exc_info)
+
+        # Add extra fields if present
+        if hasattr(record, 'user_id'):
+            log_obj['user_id'] = record.user_id
+        if hasattr(record, 'guild_id'):
+            log_obj['guild_id'] = record.guild_id
+        if hasattr(record, 'command'):
+            log_obj['command'] = record.command
+
+        return json.dumps(log_obj)
+
+# Determine if running in Cloud Run
+IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None
+
+if IS_CLOUD_RUN:
+    # Use structured JSON logging for Cloud Run
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(StructuredFormatter())
+    logging.basicConfig(
+        level=getattr(logging, LOG_LEVEL),
+        handlers=[handler]
+    )
+else:
+    # Use human-readable logging for local development
+    logging.basicConfig(
+        level=getattr(logging, LOG_LEVEL),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
 logger = logging.getLogger('discord_bot')
+logger.info(f"Logging configured. Environment: {'Cloud Run' if IS_CLOUD_RUN else 'Local'}")
 
 # Configuration
 TOKEN = os.getenv('DISCORD_TOKEN')

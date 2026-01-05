@@ -1,6 +1,10 @@
 # Ask-100x Discord Bot
 
+[![Deploy to Cloud Run](https://github.com/Yash-Kavaiya/Ask-100x/actions/workflows/deploy-cloudrun.yml/badge.svg)](https://github.com/Yash-Kavaiya/Ask-100x/actions/workflows/deploy-cloudrun.yml)
+
 A Discord bot built with Python async that allows users to ask questions with a daily rate limit. Users can send up to 10 messages per day.
+
+**Deploy to Google Cloud Run in 5 minutes!** See [DEPLOYMENT_QUICKSTART.md](DEPLOYMENT_QUICKSTART.md)
 
 ## Features
 
@@ -179,60 +183,62 @@ Run the bot in development mode and test commands in your Discord server.
 
 ## Deployment to Google Cloud Run
 
-This bot can be deployed to Google Cloud Run for 24/7 availability with automatic scaling and logging.
+Deploy your Discord bot to Google Cloud Run for 24/7 availability with automatic scaling and comprehensive logging.
 
-### Quick Deploy
+### Features
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+- **No Service Account Keys**: Uses Workload Identity Federation (secure!)
+- **Automatic Deployment**: Push to GitHub = automatic deploy via GitHub Actions
+- **Structured Logging**: JSON logs in Google Cloud Logging
+- **Always-On**: Configured with min-instances=1 for 24/7 availability
+- **Zero-Downtime Deploys**: Traffic routing for seamless updates
 
-#### Prerequisites
-- Google Cloud Platform account
-- GitHub repository
-- Discord bot token
+### Quick Start (5 Minutes)
 
-#### Setup GitHub Secrets
+See [DEPLOYMENT_QUICKSTART.md](DEPLOYMENT_QUICKSTART.md) for a fast deployment guide.
 
-Add these secrets to your GitHub repository (Settings → Secrets and variables → Actions):
+**Steps:**
+1. Run `./setup-gcp.sh` to configure Google Cloud
+2. Add 4 secrets to GitHub repository
+3. Push to main branch
+4. Bot automatically deploys!
+
+### Detailed Guide
+
+For comprehensive setup instructions, see [CLOUD_RUN_SETUP.md](CLOUD_RUN_SETUP.md).
+
+### Required GitHub Secrets
+
+Add these to your GitHub repository (Settings → Secrets and variables → Actions):
 
 | Secret | Description |
 |--------|-------------|
 | `GCP_PROJECT_ID` | Your GCP Project ID |
-| `GCP_SA_KEY` | Service Account JSON Key |
+| `WIF_PROVIDER` | Workload Identity Provider (from setup script) |
+| `WIF_SERVICE_ACCOUNT` | Service Account email (from setup script) |
 | `DISCORD_TOKEN` | Your Discord bot token |
 
-#### Auto-Deploy
-
-Push to `main` or `master` branch to automatically deploy:
+### View Logs
 
 ```bash
-git add .
-git commit -m "Deploy to Cloud Run"
-git push origin main
-```
-
-The GitHub Actions workflow will:
-1. Build Docker image
-2. Push to Google Container Registry
-3. Deploy to Cloud Run
-4. Configure logging and monitoring
-
-#### View Logs
-
-```bash
-# View logs in real-time
+# Real-time logs
 gcloud run services logs tail discord-bot-ask-100x \
+  --platform managed \
+  --region us-central1
+
+# View in Cloud Console
+gcloud run services describe discord-bot-ask-100x \
   --platform managed \
   --region us-central1
 ```
 
-#### Features
-- ✅ Automatic deployment via GitHub Actions
-- ✅ Comprehensive logging with Google Cloud Logging
-- ✅ Always-on (min-instances=1)
-- ✅ Health checks and auto-restart
-- ✅ Environment variable management
+### Cost Estimate
 
-For complete deployment guide, see [DEPLOYMENT.md](DEPLOYMENT.md).
+- **Cloud Run**: ~$15-20/month (always-on configuration)
+- **Logging**: ~$2/month
+- **Total**: ~$17-22/month
+
+For detailed deployment guide, see [CLOUD_RUN_SETUP.md](CLOUD_RUN_SETUP.md).
 
 ## License
 
