@@ -458,12 +458,33 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
             ephemeral=True
         )
 
+
+# Health check server for Cloud Run
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_health_server():
+    port = int(os.getenv("PORT", 8080))
+    logger.info(f"Starting health check server on port {port}")
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
 # Run the bot
 if __name__ == "__main__":
     if not TOKEN:
         logger.error("DISCORD_TOKEN not found in environment variables!")
         logger.error("Please create a .env file with your bot token.")
         exit(1)
+
+    # Start health check server in background
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
 
     try:
         logger.info("Starting Discord bot...")
