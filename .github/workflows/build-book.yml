@@ -1,0 +1,208 @@
+name: Build PDF Book from Markdown
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trigger: any push that touches a Markdown file, the conversion script, or
+# this workflow file itself.  Also available for manual runs.
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "**.md"
+      - ".github/scripts/**"
+      - ".github/filters/**"
+      - ".github/workflows/build-book.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Cancel any in-progress run for the same branch so we don't queue up stale
+# builds when several commits arrive quickly.
+concurrency:
+  group: build-book-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: MD → LaTeX → PDF
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so git operations work
+
+      # ── 2. Install system packages (TeX Live, pandoc, librsvg2) ────────────
+      #    NOTE: We use plain apt-get instead of awalsh128/cache-apt-pkgs-action
+      #    because the cache action does not reliably run dpkg post-install hooks,
+      #    leaving TeX Live in a broken state (missing pdflatex.fmt, libpaper1
+      #    Perl errors, cascading dependency failures).  The ~3 min install time
+      #    is an acceptable trade-off for a working build.
+      - name: Install apt packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-latex-recommended \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-science \
+            latexmk \
+            pandoc \
+            librsvg2-bin \
+            imagemagick
+          echo "pdflatex: $(kpsewhich pdflatex.fmt)"
+
+      # ── 3. Node.js + mermaid-cli (cached) ─────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache mermaid-cli installation
+        id: cache-mmdc
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm-global
+          # Use a cache key independent of an exact mermaid-cli patch version
+          # so CI doesn't break if a very specific patch release is unpublished.
+          key: mmdc-${{ runner.os }}-mermaid-latest
+
+      - name: Install mermaid-cli (if not cached)
+        if: steps.cache-mmdc.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.npm-global
+          npm config set prefix ~/.npm-global
+          # Install the latest published mermaid-cli; pinning to an exact
+          # patch version caused ETARGET when that exact version was not
+          # available in the registry. Using @latest avoids that failure.
+          npm install -g @mermaid-js/mermaid-cli@latest
+
+      - name: Add npm-global bin to PATH
+        run: echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
+
+      - name: Verify tools
+        run: |
+          echo "mmdc:    $(mmdc --version 2>/dev/null || echo 'NOT FOUND')"
+          echo "pandoc:  $(pandoc --version | head -1)"
+          echo "latexmk: $(latexmk --version | head -1)"
+          echo "rsvg:    $(rsvg-convert --version 2>/dev/null | head -1 || echo 'NOT FOUND')"
+
+      # ── 4. Python ──────────────────────────────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── 5. Restore cached images ───────────────────────────────────────────
+      #    Key contains a hash of all .md files so the cache is invalidated
+      #    whenever any markdown content changes.  The restore-key lets us reuse
+      #    a partial cache (e.g. when only one chapter changed).
+      - name: Restore image cache
+        uses: actions/cache@v4
+        with:
+          path: LATEX/images
+          key: images-v2-${{ hashFiles('**.md') }}
+          restore-keys: |
+            images-v2-
+
+      # ── 6. Convert MD → LaTeX (download images, render mermaid) ───────────
+      - name: Convert Markdown to LaTeX
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/convert_md_to_latex.py
+          echo "--- image inventory ---"
+          ls -1 LATEX/images | wc -l
+          echo "--- SVG files remaining ---"
+          ls LATEX/images/*.svg 2>/dev/null | wc -l || echo "0"
+
+      # ── 6b. Post-process LaTeX (fix tables, images, math edge cases) ─────
+      - name: Fix LaTeX files
+        run: python .github/scripts/fix_all_tex.py
+
+      # ── 7. Compile LaTeX → PDF ────────────────────────────────────────────
+      - name: Compile book.tex → book.pdf
+        working-directory: LATEX
+        run: |
+          # Run latexmk twice (TOC + cross-refs).  Use || true on first pass so
+          # minor warnings don't abort; the second pass checks for a real PDF.
+          latexmk -pdf \
+            -interaction=nonstopmode \
+            -pdflatex="pdflatex -interaction=nonstopmode -file-line-error" \
+            book.tex 2>&1 | tail -60 || true
+
+          # Hard fail if no PDF was produced
+          if [ ! -f book.pdf ]; then
+            echo "::error::PDF compilation failed — check latexmk output above"
+            exit 1
+          fi
+
+          SIZE=$(du -sh book.pdf | cut -f1)
+          PAGES=$(pdfinfo book.pdf 2>/dev/null | grep Pages | awk '{print $2}' || echo "?")
+          echo "PDF ready: ${SIZE}, ${PAGES} pages"
+
+      # ── 8. Commit LATEX/ (including book.pdf) back to the repo ────────────
+      - name: Commit generated book
+        if: github.event_name == 'push'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add LATEX/
+          if git diff --staged --quiet; then
+            echo "Nothing changed — skipping commit."
+          else
+            # Count what changed
+            CHANGED=$(git diff --staged --name-only | wc -l)
+            git commit -m "Auto-generate LaTeX book from Markdown [skip ci]
+
+            Changed files: ${CHANGED}
+            Triggered by: ${{ github.event.head_commit.message }}"
+            # Rebase on any concurrent push before pushing
+            git pull --rebase origin ${{ github.ref_name }}
+            git push
+          fi
+
+      # ── 9. Upload artifacts ────────────────────────────────────────────────
+      - name: Upload PDF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-pdf-${{ github.run_number }}
+          path: LATEX/book.pdf
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload LaTeX sources artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: latex-sources-${{ github.run_number }}
+          path: |
+            LATEX/book.tex
+            LATEX/chapters/
+          retention-days: 30
+
+      # ── 10. Job summary ────────────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Book Build Summary" >> $GITHUB_STEP_SUMMARY
+          if [ -f LATEX/book.pdf ]; then
+            SIZE=$(du -sh LATEX/book.pdf | cut -f1)
+            PAGES=$(pdfinfo LATEX/book.pdf 2>/dev/null | grep Pages | awk '{print $2}' || echo "?")
+            IMGS=$(ls LATEX/images 2>/dev/null | wc -l || echo "0")
+            echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| PDF size | ${SIZE} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Pages | ${PAGES} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Images | ${IMGS} |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Download the PDF from the **Artifacts** section above." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "PDF was **not** generated. Check the compilation log." >> $GITHUB_STEP_SUMMARY
+          fi
